@@ -1,0 +1,182 @@
+
+import re
+import csv
+import os
+from urllib.parse import urlparse
+
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+
+
+# Small demonstration dataset.
+# For a meaningful project, replace or expand this with a real,
+# labelled phishing/legitimate email dataset.
+DATA = [
+    ("Urgent: verify your account now by clicking this link", "Phishing"),
+    ("You won a prize claim your reward immediately", "Phishing"),
+    ("Your bank account is blocked update your password", "Phishing"),
+    ("Confirm your login details to avoid account suspension", "Phishing"),
+    ("Click here to receive your free gift card today", "Phishing"),
+    ("Your payment failed verify your billing information", "Phishing"),
+    ("Unusual activity detected sign in immediately", "Phishing"),
+    ("Congratulations you have been selected for a cash prize", "Phishing"),
+    ("Reset your password using this unexpected link", "Phishing"),
+    ("Download the attachment to claim your refund", "Phishing"),
+    ("Your account will be closed unless you act now", "Phishing"),
+    ("Enter your bank details to receive the transfer", "Phishing"),
+    ("Meeting agenda for tomorrow's project discussion", "Safe"),
+    ("Please find the minutes from our team meeting", "Safe"),
+    ("Your order confirmation and shipping details", "Safe"),
+    ("The lecture notes are attached for your review", "Safe"),
+    ("Reminder: project presentation is scheduled for Friday", "Safe"),
+    ("Thank you for attending today's training session", "Safe"),
+    ("Your monthly statement is available in the official app", "Safe"),
+    ("Can we reschedule our appointment for next week", "Safe"),
+    ("Here is the report you requested yesterday", "Safe"),
+    ("The team lunch is planned for Wednesday afternoon", "Safe"),
+    ("Your subscription receipt is ready for viewing", "Safe"),
+    ("Please review the draft and share your feedback", "Safe"),
+]
+
+
+def extract_features(email_text):
+    """Extract simple indicators from email text."""
+    urls = re.findall(r"https?://\S+|www\.\S+", email_text, re.IGNORECASE)
+
+    suspicious_words = [
+        "urgent", "verify", "password", "prize", "blocked",
+        "immediately", "click here", "account suspended",
+        "bank details", "claim your"
+    ]
+
+    lower_text = email_text.lower()
+    keyword_count = sum(word in lower_text for word in suspicious_words)
+
+    return {
+        "email_length": len(email_text),
+        "url_count": len(urls),
+        "suspicious_keyword_count": keyword_count,
+        "urls": urls
+    }
+
+
+def train_model():
+    texts = [item[0] for item in DATA]
+    labels = [item[1] for item in DATA]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        texts,
+        labels,
+        test_size=0.25,
+        random_state=42,
+        stratify=labels
+    )
+
+    model = Pipeline([
+        ("tfidf", TfidfVectorizer(
+            lowercase=True,
+            ngram_range=(1, 2),
+            strip_accents="unicode"
+        )),
+        ("classifier", LogisticRegression(max_iter=1000))
+    ])
+
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+
+    print("\n--- MODEL EVALUATION ---")
+    print(f"Test accuracy: {accuracy_score(y_test, predictions):.2%}")
+    print("\nConfusion matrix (labels: Phishing, Safe):")
+    print(confusion_matrix(
+        y_test, predictions, labels=["Phishing", "Safe"]
+    ))
+    print("\nClassification report:")
+    print(classification_report(
+        y_test, predictions, labels=["Phishing", "Safe"],
+        zero_division=0
+    ))
+
+    return model
+
+
+def predict_email(model, email_text):
+    """Classify one email and display basic extracted features."""
+    features = extract_features(email_text)
+    prediction = model.predict([email_text])[0]
+
+    print("\n--- EMAIL ANALYSIS ---")
+    print("Prediction:", prediction)
+    print("Email length:", features["email_length"])
+    print("URLs found:", features["url_count"])
+    print("Suspicious keyword count:",
+          features["suspicious_keyword_count"])
+
+    if features["urls"]:
+        print("URLs:")
+        for url in features["urls"]:
+            print(" -", url)
+
+            # Display the hostname for inspection only.
+            candidate = url if url.startswith("http") else "http://" + url
+            hostname = urlparse(candidate).hostname
+            if hostname:
+                print("   Host:", hostname)
+
+    print("\nReminder: This prediction is not proof that an email is safe.")
+    return prediction
+
+
+def save_report(email_text, prediction, features):
+    """Save the most recent analysis in a text file."""
+    with open("phishing_detection_report.txt", "w",
+              encoding="utf-8") as report:
+        report.write("PHISHING EMAIL DETECTION REPORT\n")
+        report.write("=" * 35 + "\n")
+        report.write("Email analyzed:\n")
+        report.write(email_text + "\n\n")
+        report.write("Prediction: " + prediction + "\n")
+        report.write(f"Email length: {features['email_length']}\n")
+        report.write(f"URLs found: {features['url_count']}\n")
+        report.write(
+            "Suspicious keyword count: "
+            f"{features['suspicious_keyword_count']}\n"
+        )
+        report.write(
+            "\nNote: This is an educational model trained on a small "
+            "demonstration dataset. Predictions may be incorrect. "
+            "Do not use it as the sole basis for security decisions.\n"
+        )
+
+    print("\nReport saved as phishing_detection_report.txt")
+
+
+def main():
+    print("=" * 45)
+    print("      PHISHING EMAIL DETECTION MODEL")
+    print("=" * 45)
+
+    model = train_model()
+
+    while True:
+        print("\nPaste an email's subject/body below.")
+        print("Type EXIT to close the program.")
+        email_text = input("Email text: ").strip()
+
+        if email_text.upper() == "EXIT":
+            print("Program closed.")
+            break
+
+        if not email_text:
+            print("Please enter some email text.")
+            continue
+
+        prediction = predict_email(model, email_text)
+        features = extract_features(email_text)
+        save_report(email_text, prediction, features)
+
+
+if __name__ == "__main__":
+    main()
